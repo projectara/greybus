@@ -71,6 +71,24 @@ static bool gb_connection_hd_cport_id_alloc(struct gb_connection *connection)
 
 	return true;
 }
+static bool
+gb_connection_hd_cport_id_alloc_one(struct gb_connection *connection,
+					u16 cport_id)
+{
+	struct ida *ida = &connection->hd->cport_id_map;
+	int id;
+
+	(void)gb_connection_hd_cport_id_alloc;	/* avoid warning */
+	spin_lock_irq(&gb_connections_lock);
+	id = ida_simple_get(ida, cport_id, cport_id + 1, GFP_KERNEL);
+	spin_unlock_irq(&gb_connections_lock);
+	if (id < 0)
+		return false;
+
+	connection->hd_cport_id = (u16)id;
+
+	return true;
+}
 
 /*
  * Free a previously-allocated CPort Id on the given host device.
@@ -157,7 +175,9 @@ struct gb_connection *gb_connection_create(struct gb_interface *interface,
 
 	hd = interface->gmod->hd;
 	connection->hd = hd;
-	if (!gb_connection_hd_cport_id_alloc(connection)) {
+	if (!gb_connection_hd_cport_id_alloc_one(connection, cport_id)) {
+		pr_err("failed to allocate AP cport id 0x%04hx\n",
+				cport_id);
 		gb_protocol_put(connection->protocol);
 		kfree(connection);
 		return NULL;
