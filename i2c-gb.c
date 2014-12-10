@@ -6,6 +6,7 @@
  * Released under the GPLv2 only.
  */
 
+#include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -23,7 +24,15 @@ struct gb_i2c_device {
 	u8			retries;
 
 	struct i2c_adapter	adapter;
+	struct irq_chip		irqc;
+	struct irq_chip		*irqchip;
+	struct irq_domain	*irqdomain;
+	unsigned int		irq_base;
+	irq_flow_handler_t	irq_handler;
+	unsigned int		irq_default_type;
 };
+#define i2c_adapter_to_gb_i2c_device(adapter) \
+	container_of(adapter, struct gb_i2c_device, adapter)
 
 /* Version of the Greybus i2c protocol we support */
 #define	GB_I2C_VERSION_MAJOR		0x00
@@ -36,6 +45,11 @@ struct gb_i2c_device {
 #define	GB_I2C_TYPE_TIMEOUT		0x03
 #define	GB_I2C_TYPE_RETRIES		0x04
 #define	GB_I2C_TYPE_TRANSFER		0x05
+#define GB_I2C_TYPE_IRQ_TYPE		0x06
+#define GB_I2C_TYPE_IRQ_ACK		0x07
+#define GB_I2C_TYPE_IRQ_MASK		0x08
+#define GB_I2C_TYPE_IRQ_UNMASK		0x09
+#define GB_I2C_TYPE_IRQ_EVENT		0x0a
 #define	GB_I2C_TYPE_RESPONSE		0x80	/* OR'd with rest */
 
 #define	GB_I2C_RETRIES_DEFAULT		3
@@ -85,6 +99,33 @@ struct gb_i2c_transfer_request {
 struct gb_i2c_transfer_response {
 	__u8				data[0];	/* inbound data */
 };
+
+struct gb_i2c_irq_type_request {
+	__u8	which;
+	__u8	type;
+};
+/* irq type response has no payload */
+
+struct gb_i2c_irq_mask_request {
+	__u8	which;
+};
+/* irq mask response has no payload */
+
+struct gb_i2c_irq_unmask_request {
+	__u8	which;
+};
+/* irq unmask response has no payload */
+
+struct gb_i2c_irq_ack_request {
+	__u8	which;
+};
+/* irq ack response has no payload */
+
+/* irq event requests originate on another module and are handled on the AP */
+struct gb_i2c_irq_event_request {
+	__u8	which;
+};
+/* irq event response has no payload */
 
 /*
  * This request only uses the connection field, and if successful,
@@ -377,10 +418,246 @@ static int gb_i2c_device_setup(struct gb_i2c_device *gb_i2c_dev)
 	return gb_i2c_timeout_operation(gb_i2c_dev, GB_I2C_TIMEOUT_DEFAULT);
 }
 
+/**
+ * gb_i2c_irq_map() - maps an IRQ into a GB i2c irqchip
+ * @d: the irqdomain used by this irqchip
+ * @irq: the global irq number used by this GB i2c irqchip irq
+ * @hwirq: the local IRQ/GPIO line offset on this GB i2c
+ *
+ * This function will set up the mapping for a certain IRQ line on a
+ * GB i2c by assigning the GB i2c as chip data, and using the irqchip
+ * stored inside the GB i2c.
+ */
+static int gb_i2c_irq_map(struct irq_domain *d, unsigned int irq,
+			    irq_hw_number_t hwirq)
+{
+	struct gb_i2c_device *gid = d->host_data;
+
+	irq_set_chip_data(irq, gid);
+	irq_set_chip_and_handler(irq, gid->irqchip, gid->irq_handler);
+#ifdef CONFIG_ARM
+	set_irq_flags(irq, IRQF_VALID);
+#else
+	irq_set_noprobe(irq);
+#endif
+	/*
+	 * No set-up of the hardware will happen if IRQ_TYPE_NONE
+	 * is passed as default type.
+	 */
+	if (gid->irq_default_type != IRQ_TYPE_NONE)
+		irq_set_irq_type(irq, gid->irq_default_type);
+
+	return 0;
+}
+
+static void gb_i2c_irq_unmap(struct irq_domain *d, unsigned int irq)
+{
+#ifdef CONFIG_ARM
+	set_irq_flags(irq, 0);
+#endif
+	irq_set_chip_and_handler(irq, NULL, NULL);
+	irq_set_chip_data(irq, NULL);
+}
+
+static const struct irq_domain_ops gb_i2c_domain_ops = {
+	.map	= gb_i2c_irq_map,
+	.unmap	= gb_i2c_irq_unmap,
+};
+
+#if 0
+static int gb_i2c_irq_reqres(struct irq_data *d)
+{
+	return 0;
+}
+
+static void gb_i2c_irq_relres(struct irq_data *d)
+{
+}
+#endif
+
+/**
+ * gb_i2c_irqchip_remove() - removes an irqchip added to a gb_i2c_dev
+ * @gid: the gb_i2c_dev to remove the irqchip from
+ *
+ * This is called only from gb_i2c_remove()
+ */
+static void gb_i2c_irqchip_remove(struct gb_i2c_device *gid)
+{
+	/* Remove all IRQ mappings and delete the domain */
+	if (gid->irqdomain) {
+		irq_dispose_mapping(irq_find_mapping(gid->irqdomain, 0));
+		irq_domain_remove(gid->irqdomain);
+	}
+
+	if (gid->irqchip) {
+		gid->irqchip->irq_request_resources = NULL;
+		gid->irqchip->irq_release_resources = NULL;
+		gid->irqchip = NULL;
+	}
+}
+
+/**
+ * gb_i2c_irqchip_add() - adds an irqchip to a i2c adapter
+ * @adapter: the adapter to add the irqchip to
+ * @irqchip: the irqchip to add to the adapter
+ * @first_irq: if not dynamically assigned, the base (first) IRQ to
+ * allocate i2c irqs from
+ * @handler: the irq handler to use (often a predefined irq core function)
+ * @type: the default type for IRQs on this irqchip, pass IRQ_TYPE_NONE
+ * to have the core avoid setting up any default type in the hardware.
+ *
+ * This function closely associates a certain irqchip with a certain
+ * i2c adapter, providing an irq domain to translate the local IRQs to
+ * global irqs, and making sure that the i2c adapter
+ * is passed as chip data to all related functions. Driver callbacks
+ * need to use container_of() to get their local state containers back
+ * from the i2c adapter passed as chip data. An irqdomain will be stored
+ * in the i2c adapter that shall be used by the driver to handle IRQ number
+ * translation. The i2c adapter will need to be initialized and registered
+ * before calling this function.
+ */
+static int gb_i2c_irqchip_add(struct i2c_adapter *adapter,
+			 struct irq_chip *irqchip,
+			 unsigned int first_irq,
+			 irq_flow_handler_t handler,
+			 unsigned int type)
+{
+	struct gb_i2c_device *gid;
+
+	if (!adapter || !irqchip)
+		return -EINVAL;
+
+	gid = i2c_adapter_to_gb_i2c_device(adapter);
+
+	gid->irqchip = irqchip;
+	gid->irq_handler = handler;
+	gid->irq_default_type = type;
+	gid->irqdomain = irq_domain_add_simple(NULL,
+					1, first_irq,
+					&gb_i2c_domain_ops, gid);
+	if (!gid->irqdomain) {
+		gid->irqchip = NULL;
+		return -EINVAL;
+	}
+#if 0
+	irqchip->irq_request_resources = gb_i2c_irq_reqres;
+	irqchip->irq_release_resources = gb_i2c_irq_relres;
+#endif
+
+	/*
+	 * Prepare the mapping since the irqchip shall be orthogonal to
+	 * any i2c calls. If the first_irq was zero, this is
+	 * necessary to allocate descriptors for all IRQs.
+	 */
+	gid->irq_base = irq_create_mapping(gid->irqdomain, 0);
+
+	return 0;
+}
+static void gb_i2c_ack_irq(struct irq_data *d)
+{
+	struct irq_domain *domain = d->domain;
+	struct gb_i2c_device *gid = domain->host_data;
+	struct gb_i2c_irq_ack_request request;
+	int ret;
+
+	request.which = 0;
+	ret = gb_operation_sync(gid->connection,
+				GB_I2C_TYPE_IRQ_ACK,
+				&request, sizeof(request), NULL, 0);
+	if (ret)
+		pr_err("irq ack operation failed (%d)\n", ret);
+}
+
+static void gb_i2c_mask_irq(struct irq_data *d)
+{
+	struct irq_domain *domain = d->domain;
+	struct gb_i2c_device *gid = domain->host_data;
+	struct gb_i2c_irq_mask_request request;
+	int ret;
+
+	request.which = 0;
+	ret = gb_operation_sync(gid->connection,
+				GB_I2C_TYPE_IRQ_MASK,
+				&request, sizeof(request), NULL, 0);
+	if (ret)
+		pr_err("irq mask operation failed (%d)\n", ret);
+}
+
+static void gb_i2c_unmask_irq(struct irq_data *d)
+{
+	struct irq_domain *domain = d->domain;
+	struct gb_i2c_device *gid = domain->host_data;
+	struct gb_i2c_irq_unmask_request request;
+	int ret;
+
+	request.which = 0;
+	ret = gb_operation_sync(gid->connection,
+				GB_I2C_TYPE_IRQ_UNMASK,
+				&request, sizeof(request), NULL, 0);
+	if (ret)
+		pr_err("irq unmask operation failed (%d)\n", ret);
+}
+
+static int gb_i2c_irq_set_type(struct irq_data *d, unsigned int type)
+{
+	struct irq_domain *domain = d->domain;
+	struct gb_i2c_device *gid = domain->host_data;
+	struct gb_i2c_irq_type_request request;
+	int ret;
+
+	request.which = 0;
+	request.type = type;
+	ret = gb_operation_sync(gid->connection,
+				GB_I2C_TYPE_IRQ_TYPE,
+				&request, sizeof(request), NULL, 0);
+	if (ret)
+		pr_err("irq type operation failed (%d)\n", ret);
+
+	return ret;
+}
+
+static void gb_i2c_request_recv(u8 type, struct gb_operation *op)
+{
+	struct gb_i2c_device *gid;
+	struct gb_connection *connection;
+	struct gb_message *request;
+	struct gb_i2c_irq_event_request *event;
+	int irq;
+	struct irq_desc *desc;
+	int ret;
+
+	if (type != GB_I2C_TYPE_IRQ_EVENT) {
+		pr_err("unsupported unsolicited request\n");
+		return;
+	}
+
+	connection = op->connection;
+	gid = connection->private;
+
+	request = op->request;
+	event = request->payload;
+	if (event->which) {
+		pr_err("Unsupported hw irq %d\n", event->which);
+		return;
+	}
+	irq = gid->irq_base + event->which;
+	desc = irq_to_desc(irq);
+
+	/* Dispatch interrupt */
+	local_irq_disable();
+	handle_simple_irq(irq, desc);
+	local_irq_enable();
+
+	ret = gb_operation_response_send(op, 0);
+	if (ret)
+		pr_err("error %d sending response status %d\n", ret, 0);
+}
+
 static int gb_i2c_connection_init(struct gb_connection *connection)
 {
 	struct gb_i2c_device *gb_i2c_dev;
 	struct i2c_adapter *adapter;
+	struct irq_chip *irqc;
 	int ret;
 
 	gb_i2c_dev = kzalloc(sizeof(*gb_i2c_dev), GFP_KERNEL);
@@ -393,6 +670,14 @@ static int gb_i2c_connection_init(struct gb_connection *connection)
 	ret = gb_i2c_device_setup(gb_i2c_dev);
 	if (ret)
 		goto out_err;
+
+	irqc = &gb_i2c_dev->irqc;
+
+	irqc->irq_ack = gb_i2c_ack_irq;
+	irqc->irq_mask = gb_i2c_mask_irq;
+	irqc->irq_unmask = gb_i2c_unmask_irq;
+	irqc->irq_set_type = gb_i2c_irq_set_type;
+	irqc->name = "greybus_i2c";
 
 	/* Looks good; up our i2c adapter */
 	adapter = &gb_i2c_dev->adapter;
@@ -411,7 +696,21 @@ static int gb_i2c_connection_init(struct gb_connection *connection)
 	if (ret)
 		goto out_err;
 
+	ret = gb_i2c_irqchip_add(adapter, irqc, 0,
+			      handle_simple_irq, IRQ_TYPE_NONE);
+
+	if (ret) {
+		pr_err("Couldn't add irqchip to i2c adapter (%d)\n", ret);
+		ret = -ENODEV;
+		goto del_adapter;
+	}
+
+	pr_info("gb-i2c: added irq %d\n", gb_i2c_dev->irq_base);
+
 	return 0;
+
+del_adapter:
+	i2c_del_adapter(adapter);
 out_err:
 	/* kref_put(gb_i2c_dev->connection) */
 	kfree(gb_i2c_dev);
@@ -422,6 +721,8 @@ out_err:
 static void gb_i2c_connection_exit(struct gb_connection *connection)
 {
 	struct gb_i2c_device *gb_i2c_dev = connection->private;
+
+	gb_i2c_irqchip_remove(gb_i2c_dev);
 
 	i2c_del_adapter(&gb_i2c_dev->adapter);
 	/* kref_put(gb_i2c_dev->connection) */
@@ -434,7 +735,7 @@ static struct gb_protocol i2c_protocol = {
 	.minor			= 1,
 	.connection_init	= gb_i2c_connection_init,
 	.connection_exit	= gb_i2c_connection_exit,
-	.request_recv		= NULL,	/* no incoming requests */
+	.request_recv		= gb_i2c_request_recv,
 };
 
 bool gb_i2c_protocol_init(void)
