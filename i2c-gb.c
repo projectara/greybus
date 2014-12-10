@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
+#include <linux/i2c/mms114.h>
 
 #include "greybus.h"
 
@@ -653,10 +654,23 @@ static void gb_i2c_request_recv(u8 type, struct gb_operation *op)
 		pr_err("error %d sending response status %d\n", ret, 0);
 }
 
+static struct mms114_platform_data spiral2_ts_pdata = {
+	.x_size		= 720,
+	.y_size		= 1280,
+};
+
+static struct i2c_board_info board_info = {
+	.type		= "mms114",
+	.addr		= 0x48,
+	.irq		= 91,
+	.platform_data	= &spiral2_ts_pdata,
+};
+
 static int gb_i2c_connection_init(struct gb_connection *connection)
 {
 	struct gb_i2c_device *gb_i2c_dev;
 	struct i2c_adapter *adapter;
+	struct i2c_client *client;
 	struct irq_chip *irqc;
 	int ret;
 
@@ -707,8 +721,17 @@ static int gb_i2c_connection_init(struct gb_connection *connection)
 
 	pr_info("gb-i2c: added irq %d\n", gb_i2c_dev->irq_base);
 
+	client = i2c_new_device(adapter, &board_info);
+	if (!client) {
+		pr_err("Couldn't instantiate i2c client device (%d)\n", ret);
+		ret = -ENODEV;
+		goto rm_irqchip;
+	}
+
 	return 0;
 
+rm_irqchip:
+	gb_i2c_irqchip_remove(gb_i2c_dev);
 del_adapter:
 	i2c_del_adapter(adapter);
 out_err:
