@@ -12,7 +12,8 @@
 #include <linux/slab.h>
 #include <linux/i2c.h>
 #include <linux/i2c/mms114.h>
-
+#include <linux/irq.h>
+#include <linux/irqdomain.h>
 #include "greybus.h"
 
 struct gb_i2c_device {
@@ -491,8 +492,6 @@ static void gb_i2c_irqchip_remove(struct gb_i2c_device *gid)
 	}
 
 	if (gid->irqchip) {
-		gid->irqchip->irq_request_resources = NULL;
-		gid->irqchip->irq_release_resources = NULL;
 		gid->irqchip = NULL;
 	}
 }
@@ -540,10 +539,6 @@ static int gb_i2c_irqchip_add(struct i2c_adapter *adapter,
 		gid->irqchip = NULL;
 		return -EINVAL;
 	}
-#if 0
-	irqchip->irq_request_resources = gb_i2c_irq_reqres;
-	irqchip->irq_release_resources = gb_i2c_irq_relres;
-#endif
 
 	/*
 	 * Prepare the mapping since the irqchip shall be orthogonal to
