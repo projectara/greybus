@@ -9,6 +9,50 @@
 
 #include "greybus.h"
 
+struct gb_intf_dme_attr {
+	const char *label;
+	u16 attr;
+};
+
+static struct gb_intf_dme_attr dme_attrs[] = {
+	{
+		.label = "avail_tx_data_lanes",
+		.attr  = DME_ATTR_PA_AVAILTXDATALANES,
+	},
+	{
+		.label = "avail_rx_data_lanes",
+		.attr  = DME_ATTR_PA_AVAILRXDATALANES,
+	},
+	{
+		.label = "active_tx_data_lanes",
+		.attr  = DME_ATTR_PA_ACTIVETXDATALANES,
+	},
+	{
+		.label = "active_rx_data_lanes",
+		.attr  = DME_ATTR_PA_ACTIVERXDATALANES,
+	},
+	{
+		.label = "conn_tx_data_lanes",
+		.attr  = DME_ATTR_PA_CONNECTEDTXDATALANES,
+	},
+	{
+		.label = "conn_rx_data_lanes",
+		.attr  = DME_ATTR_PA_CONNECTEDRXDATALANES,
+	},
+	{
+		.label = "tx_gear",
+		.attr  = DME_ATTR_PA_TXGEAR,
+	},
+	{
+		.label = "rx_gear",
+		.attr  = DME_ATTR_PA_RXGEAR,
+	},
+	{
+		.label = "power_mode",
+		.attr  = DME_ATTR_PA_PWRMODE,
+	},
+};
+
 /* interface sysfs attributes */
 #define gb_interface_attr(field, type)					\
 static ssize_t field##_show(struct device *dev,				\
@@ -26,16 +70,41 @@ gb_interface_attr(product_id, x);
 gb_interface_attr(vendor_string, s);
 gb_interface_attr(product_string, s);
 
+static ssize_t dme_attr_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct gb_interface *intf = to_gb_interface(dev);
+	struct gb_host_device *hd = intf->hd;
+	int i;
+	ssize_t ret = 0;
+	u32 val;
+
+	for (i = 0; i < ARRAY_SIZE(dme_attrs); i++) {
+		ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%s:",
+					dme_attrs[i].label);
+		if (gb_svc_dme_peer_get(hd->svc, intf->interface_id,
+					dme_attrs[i].attr,
+					DME_ATTR_SELECTOR_INDEX, &val)) {
+			ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%u\n", (u32)-1);
+		} else {
+			ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%u\n", val);
+		}
+	}
+
+	return ret;
+}
+static DEVICE_ATTR_RO(dme_attr);
+
 static struct attribute *interface_attrs[] = {
 	&dev_attr_interface_id.attr,
 	&dev_attr_vendor_id.attr,
 	&dev_attr_product_id.attr,
 	&dev_attr_vendor_string.attr,
 	&dev_attr_product_string.attr,
+	&dev_attr_dme_attr.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(interface);
-
 
 /* XXX This could be per-host device */
 static DEFINE_SPINLOCK(gb_interfaces_lock);
