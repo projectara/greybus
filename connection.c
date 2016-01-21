@@ -73,7 +73,7 @@ static void gb_connection_kref_release(struct kref *kref)
 	struct gb_connection *connection;
 
 	connection = container_of(kref, struct gb_connection, kref);
-
+	destroy_workqueue(connection->wq);
 	kfree(connection);
 	mutex_unlock(&connection_mutex);
 }
@@ -500,7 +500,9 @@ out_unlock:
 }
 EXPORT_SYMBOL_GPL(gb_connection_disable);
 
-/* Caller must have disabled the connection before destroying it. */
+/*
+ * Tear down a previously set up connection.
+ */
 void gb_connection_destroy(struct gb_connection *connection)
 {
 	struct ida *id_map;
@@ -512,8 +514,6 @@ void gb_connection_destroy(struct gb_connection *connection)
 	list_del(&connection->bundle_links);
 	list_del(&connection->hd_links);
 	spin_unlock_irq(&gb_connections_lock);
-
-	destroy_workqueue(connection->wq);
 
 	id_map = &connection->hd->cport_id_map;
 	ida_simple_remove(id_map, connection->hd_cport_id);
