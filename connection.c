@@ -396,18 +396,6 @@ int gb_connection_enable(struct gb_connection *connection,
 	if (connection->state == GB_CONNECTION_STATE_ENABLED)
 		goto out_unlock;
 
-	if (connection->state == GB_CONNECTION_STATE_ENABLED_TX) {
-		if (!handler)
-			goto out_unlock;
-
-		spin_lock_irq(&connection->lock);
-		connection->handler = handler;
-		connection->state = GB_CONNECTION_STATE_ENABLED;
-		spin_unlock_irq(&connection->lock);
-
-		goto out_unlock;
-	}
-
 	ret = gb_connection_hd_cport_enable(connection);
 	if (ret)
 		goto err_unlock;
@@ -418,10 +406,7 @@ int gb_connection_enable(struct gb_connection *connection,
 
 	spin_lock_irq(&connection->lock);
 	connection->handler = handler;
-	if (handler)
-		connection->state = GB_CONNECTION_STATE_ENABLED;
-	else
-		connection->state = GB_CONNECTION_STATE_ENABLED_TX;
+	connection->state = GB_CONNECTION_STATE_ENABLED;
 	spin_unlock_irq(&connection->lock);
 
 	ret = gb_connection_control_connected(connection);
@@ -437,7 +422,6 @@ err_svc_destroy:
 	spin_lock_irq(&connection->lock);
 	connection->state = GB_CONNECTION_STATE_DISABLED;
 	gb_connection_cancel_operations(connection, -ESHUTDOWN);
-	connection->handler = NULL;
 	spin_unlock_irq(&connection->lock);
 
 	gb_connection_svc_connection_destroy(connection);
@@ -462,7 +446,6 @@ void gb_connection_disable(struct gb_connection *connection)
 	spin_lock_irq(&connection->lock);
 	connection->state = GB_CONNECTION_STATE_DISABLED;
 	gb_connection_cancel_operations(connection, -ESHUTDOWN);
-	connection->handler = NULL;
 	spin_unlock_irq(&connection->lock);
 
 	gb_connection_svc_connection_destroy(connection);

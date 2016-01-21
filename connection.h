@@ -16,8 +16,7 @@
 enum gb_connection_state {
 	GB_CONNECTION_STATE_INVALID	= 0,
 	GB_CONNECTION_STATE_DISABLED	= 1,
-	GB_CONNECTION_STATE_ENABLED_TX	= 2,
-	GB_CONNECTION_STATE_ENABLED	= 3,
+	GB_CONNECTION_STATE_ENABLED	= 2,
 };
 
 struct gb_operation;
@@ -71,10 +70,6 @@ static inline bool gb_connection_is_static(struct gb_connection *connection)
 
 int gb_connection_enable(struct gb_connection *connection,
 					gb_request_handler_t handler);
-static inline int gb_connection_enable_tx(struct gb_connection *connection)
-{
-	return gb_connection_enable(connection, NULL);
-}
 void gb_connection_disable(struct gb_connection *connection);
 
 int gb_connection_legacy_init(struct gb_connection *connection);
