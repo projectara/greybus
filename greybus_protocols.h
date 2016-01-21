@@ -123,7 +123,6 @@ struct gb_protocol_version_response {
 #define GB_CONTROL_TYPE_CONNECTED		0x05
 #define GB_CONTROL_TYPE_DISCONNECTED		0x06
 #define GB_CONTROL_TYPE_INTERFACE_VERSION	0x0a
-#define GB_CONTROL_TYPE_BUNDLE_VERSION		0x0b
 
 struct gb_control_version_request {
 	__u8	major;
@@ -131,15 +130,6 @@ struct gb_control_version_request {
 } __packed;
 
 struct gb_control_version_response {
-	__u8	major;
-	__u8	minor;
-} __packed;
-
-struct gb_control_bundle_version_request {
-	__u8	bundle_id;
-} __packed;
-
-struct gb_control_bundle_version_response {
 	__u8	major;
 	__u8	minor;
 } __packed;
