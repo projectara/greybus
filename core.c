@@ -12,7 +12,6 @@
 #define CREATE_TRACE_POINTS
 #include "greybus.h"
 #include "greybus_trace.h"
-#include "legacy.h"
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(gb_host_device_send);
 EXPORT_TRACEPOINT_SYMBOL_GPL(gb_host_device_recv);
@@ -241,16 +240,8 @@ static int __init gb_init(void)
 		goto error_firmware;
 	}
 
-	retval = gb_legacy_init();
-	if (retval) {
-		pr_err("gb_legacy_init failed\n");
-		goto error_legacy;
-	}
-
 	return 0;	/* Success */
 
-error_legacy:
-	gb_firmware_protocol_exit();
 error_firmware:
 	gb_svc_protocol_exit();
 error_svc:
@@ -270,7 +261,6 @@ module_init(gb_init);
 
 static void __exit gb_exit(void)
 {
-	gb_legacy_exit();
 	gb_firmware_protocol_exit();
 	gb_svc_protocol_exit();
 	gb_control_protocol_exit();
