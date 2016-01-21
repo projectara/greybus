@@ -746,11 +746,10 @@ static int gb_svc_key_event_recv(struct gb_operation *op)
 	return 0;
 }
 
-static int gb_svc_request_handler(struct gb_operation *op)
+static int gb_svc_request_recv(u8 type, struct gb_operation *op)
 {
 	struct gb_connection *connection = op->connection;
 	struct gb_svc *svc = connection->private;
-	u8 type = op->type;
 	int ret = 0;
 
 	/*
@@ -915,7 +914,7 @@ int gb_svc_add(struct gb_svc *svc)
 	 * is added from the connection request handler when enough
 	 * information has been received.
 	 */
-	ret = gb_connection_enable(svc->connection, gb_svc_request_handler);
+	ret = gb_connection_legacy_init(svc->connection);
 	if (ret)
 		return ret;
 
@@ -924,7 +923,7 @@ int gb_svc_add(struct gb_svc *svc)
 
 void gb_svc_del(struct gb_svc *svc)
 {
-	gb_connection_disable(svc->connection);
+	gb_connection_legacy_exit(svc->connection);
 
 	/*
 	 * The SVC device and input device may have been registered
@@ -942,3 +941,31 @@ void gb_svc_put(struct gb_svc *svc)
 {
 	put_device(&svc->dev);
 }
+
+static int gb_svc_connection_init(struct gb_connection *connection)
+{
+	struct gb_svc *svc = connection->private;
+
+	dev_dbg(&svc->dev, "%s\n", __func__);
+
+	return 0;
+}
+
+static void gb_svc_connection_exit(struct gb_connection *connection)
+{
+	struct gb_svc *svc = connection->private;
+
+	dev_dbg(&svc->dev, "%s\n", __func__);
+}
+
+static struct gb_protocol svc_protocol = {
+	.name			= "svc",
+	.id			= GREYBUS_PROTOCOL_SVC,
+	.major			= GB_SVC_VERSION_MAJOR,
+	.minor			= GB_SVC_VERSION_MINOR,
+	.connection_init	= gb_svc_connection_init,
+	.connection_exit	= gb_svc_connection_exit,
+	.request_recv		= gb_svc_request_recv,
+	.flags			= GB_PROTOCOL_SKIP_VERSION,
+};
+gb_builtin_protocol_driver(svc_protocol);

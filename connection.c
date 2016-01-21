@@ -341,11 +341,16 @@ gb_connection_control_disconnected(struct gb_connection *connection)
 }
 
 /*
- * Request protocol version supported by the module.
+ * Request protocol version supported by the module. We don't need to do
+ * this for SVC as that is initiated by the SVC.
  */
 static int gb_connection_protocol_get_version(struct gb_connection *connection)
 {
+	struct gb_protocol *protocol = connection->protocol;
 	int ret;
+
+	if (protocol->flags & GB_PROTOCOL_SKIP_VERSION)
+		return 0;
 
 	ret = gb_protocol_get_version(connection);
 	if (ret) {
