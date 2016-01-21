@@ -20,10 +20,6 @@ enum gb_connection_state {
 	GB_CONNECTION_STATE_DESTROYING	= 3,
 };
 
-struct gb_operation;
-
-typedef int (*gb_request_handler_t)(struct gb_operation *);
-
 struct gb_connection {
 	struct gb_host_device		*hd;
 	struct gb_interface		*intf;
@@ -34,8 +30,6 @@ struct gb_connection {
 
 	struct list_head		hd_links;
 	struct list_head		bundle_links;
-
-	gb_request_handler_t		handler;
 
 	struct gb_protocol		*protocol;
 	u8				protocol_id;
@@ -68,8 +62,7 @@ static inline bool gb_connection_is_static(struct gb_connection *connection)
 	return !connection->intf;
 }
 
-int gb_connection_enable(struct gb_connection *connection,
-					gb_request_handler_t handler);
+int gb_connection_enable(struct gb_connection *connection);
 void gb_connection_disable(struct gb_connection *connection);
 
 int gb_connection_legacy_init(struct gb_connection *connection);
