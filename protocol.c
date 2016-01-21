@@ -141,7 +141,6 @@ struct gb_protocol *gb_protocol_get(u8 id, u8 major, u8 minor)
 
 	return protocol;
 }
-EXPORT_SYMBOL_GPL(gb_protocol_get);
 
 int gb_protocol_get_version(struct gb_connection *connection)
 {
@@ -198,4 +197,3 @@ void gb_protocol_put(struct gb_protocol *protocol)
 out:
 	spin_unlock_irq(&gb_protocols_lock);
 }
-EXPORT_SYMBOL_GPL(gb_protocol_put);
