@@ -914,7 +914,7 @@ int gb_svc_add(struct gb_svc *svc)
 	 * is added from the connection request handler when enough
 	 * information has been received.
 	 */
-	ret = gb_connection_legacy_init(svc->connection);
+	ret = gb_connection_init(svc->connection);
 	if (ret)
 		return ret;
 
@@ -923,7 +923,7 @@ int gb_svc_add(struct gb_svc *svc)
 
 void gb_svc_del(struct gb_svc *svc)
 {
-	gb_connection_legacy_exit(svc->connection);
+	gb_connection_exit(svc->connection);
 
 	/*
 	 * The SVC device and input device may have been registered
