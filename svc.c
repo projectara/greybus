@@ -385,15 +385,15 @@ static int gb_svc_version_request(struct gb_operation *op)
 		return -ENOTSUPP;
 	}
 
-	svc->protocol_major = request->major;
-	svc->protocol_minor = request->minor;
+	connection->module_major = request->major;
+	connection->module_minor = request->minor;
 
 	if (!gb_operation_response_alloc(op, sizeof(*response), GFP_KERNEL))
 		return -ENOMEM;
 
 	response = op->response->payload;
-	response->major = svc->protocol_major;
-	response->minor = svc->protocol_minor;
+	response->major = connection->module_major;
+	response->minor = connection->module_minor;
 
 	return 0;
 }

@@ -28,9 +28,6 @@ struct gb_svc {
 	u16 endo_id;
 	u8 ap_intf_id;
 
-	u8 protocol_major;
-	u8 protocol_minor;
-
 	struct input_dev        *input;
 	char                    *input_phys;
 };
