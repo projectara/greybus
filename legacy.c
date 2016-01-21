@@ -100,7 +100,7 @@ err_unbind_protocol:
 
 static void legacy_connection_exit(struct gb_connection *connection)
 {
-	if (!connection->protocol)
+	if (connection->state == GB_CONNECTION_STATE_DISABLED)
 		return;
 
 	gb_connection_disable(connection);
