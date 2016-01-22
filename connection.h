@@ -48,6 +48,8 @@ struct gb_connection {
 	atomic_t			op_cycle;
 
 	void				*private;
+
+	bool				initialized;
 };
 
 struct gb_connection *gb_connection_create_static(struct gb_host_device *hd,

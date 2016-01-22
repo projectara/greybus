@@ -825,6 +825,14 @@ static void gb_connection_recv_request(struct gb_connection *connection,
 	struct gb_operation *operation;
 	int ret;
 
+	/* HACK: drop early incoming requests */
+	if (!connection->initialized) {
+		dev_warn(&connection->hd->dev,
+				"%s: dropping early request of type 0x%02x\n",
+				connection->name, type);
+		return;
+	}
+
 	operation = gb_operation_create_incoming(connection, operation_id,
 						type, data, size);
 	if (!operation) {

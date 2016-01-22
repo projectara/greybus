@@ -455,6 +455,9 @@ int gb_connection_init(struct gb_connection *connection)
 	if (ret)
 		goto err_disable;
 
+	/* HACK: enable incoming requests */
+	connection->initialized = true;
+
 	return 0;
 
 err_disable:

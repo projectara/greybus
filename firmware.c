@@ -251,6 +251,9 @@ static int gb_firmware_connection_init(struct gb_connection *connection)
 
 	firmware_es2_fixup_vid_pid(firmware);
 
+	/* HACK: enable incoming requests */
+	connection->initialized = true;
+
 	/*
 	 * Module's Bootrom needs a way to know (currently), when to start
 	 * sending requests to the AP. The version request is sent before this
