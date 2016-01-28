@@ -18,6 +18,15 @@
 #define GB_AUDIO_MGMT_DRIVER_NAME	"gb_audio_mgmt"
 #define GB_AUDIO_DATA_DRIVER_NAME	"gb_audio_data"
 
+/*
+ * Define to call trigger code from prepare/shutdown routines.  This avoids
+ * the issue where audio doesn't play when skipping to the next song, etc.
+ */
+#define GB_AUDIO_NO_CODEC_TRIGGER
+
+static int gbcodec_trigger(struct snd_pcm_substream *substream, int cmd,
+		struct snd_soc_dai *dai);
+
 static DEFINE_MUTEX(gb_codec_list_lock);
 static LIST_HEAD(gb_codec_list);
 
@@ -96,6 +105,13 @@ static void gbcodec_shutdown(struct snd_pcm_substream *substream,
 		ret = gb_audio_gb_deactivate_rx(gb->mgmt_connection, cportid);
 		break;
 	case SNDRV_PCM_STREAM_PLAYBACK:
+#ifdef GB_AUDIO_NO_CODEC_TRIGGER
+		ret = gbcodec_trigger(substream, SNDRV_PCM_TRIGGER_STOP, dai);
+		if (ret)
+			dev_err(dai->dev,
+				"APB1 stop trigger failed: %d\n", ret);
+#endif
+
 		ret = gb_audio_gb_deactivate_tx(gb->mgmt_connection, cportid);
 		break;
 	default:
@@ -260,6 +276,14 @@ static int gbcodec_prepare(struct snd_pcm_substream *substream,
 				ret);
 			return ret;
 		}
+
+#ifdef GB_AUDIO_NO_CODEC_TRIGGER
+		ret = gbcodec_trigger(substream, SNDRV_PCM_TRIGGER_START, dai);
+		if (ret)
+			dev_err(dai->dev,
+				"APB1 start trigger failed: %d\n", ret);
+#endif
+
 		ret = gb_audio_gb_activate_tx(gb->mgmt_connection, data_cport);
 		break;
 	default:
@@ -361,7 +385,9 @@ static struct snd_soc_dai_ops gbcodec_dai_ops = {
 	.startup = gbcodec_startup,
 	.shutdown = gbcodec_shutdown,
 	.hw_params = gbcodec_hw_params,
+#ifndef GB_AUDIO_NO_CODEC_TRIGGER
 	.trigger = gbcodec_trigger,
+#endif
 	.prepare = gbcodec_prepare,
 	.set_fmt = gbcodec_set_dai_fmt,
 	.digital_mute = gbcodec_digital_mute,
